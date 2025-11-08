@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "tools/nlscan",
+    "tools/nlnetwork",
+    "common"
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Simen Mathiesen"]
+
+[workspace.dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+pnet = "0.35.0"
+threadpool = "1.8.1"

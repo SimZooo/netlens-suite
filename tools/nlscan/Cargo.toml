@@ -1,0 +1,5 @@
+[package]
+name = "nlscan"
+edition = "2024"
+version.workspace = true
+authors.workspace = true

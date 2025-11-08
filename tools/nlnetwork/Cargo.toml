@@ -1,0 +1,10 @@
+[package]
+name = "nlnetwork"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive"]}
+pnet = { workspace = true }
+threadpool = { workspace = true }
