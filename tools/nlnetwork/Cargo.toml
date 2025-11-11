@@ -8,3 +8,4 @@ authors.workspace = true
 clap = { workspace = true, features = ["derive"]}
 pnet = { workspace = true }
 threadpool = { workspace = true }
+common = { path = "../../common"}

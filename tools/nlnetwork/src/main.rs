@@ -1,55 +1,15 @@
-use std::{io, net::{IpAddr, Ipv4Addr}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread::{self, sleep}, time::{Duration, Instant}};
+use std::{net::{IpAddr, Ipv4Addr}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread::{self, sleep}, time::{Duration, Instant}};
 use threadpool::ThreadPool;
 
 use clap::Parser;
-use pnet::{datalink::{Channel::Ethernet}, ipnetwork::{Ipv4Network}, packet::{Packet, arp::{ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket}, ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket}}, util::MacAddr};
+use pnet::{datalink::{Channel::Ethernet}, ipnetwork::{Ipv4Network}, packet::{Packet, arp::{ArpOperations, ArpPacket}, ethernet::{EtherTypes, EthernetPacket}}};
 
-fn build_ping(source_mac: MacAddr, source: Ipv4Addr, dest: Ipv4Addr) -> io::Result<Vec<u8>> {
-    let mut buffer= vec![0u8; 42];
-    let eth_packet = MutableEthernetPacket::new(&mut buffer[..]);
-
-    if let Some(mut eth_packet) = eth_packet {
-        eth_packet.set_source(source_mac);
-        eth_packet.set_destination(MacAddr::broadcast());
-        eth_packet.set_ethertype(EtherTypes::Arp);
-
-        let arp_packet = MutableArpPacket::new(&mut buffer[14..]);
-        if let Some(_) = arp_packet {
-            match MutableArpPacket::new(&mut buffer[14..]) {
-                Some(mut arp_pkt) => {
-                    arp_pkt.set_hardware_type(ArpHardwareTypes::Ethernet);
-                    arp_pkt.set_protocol_type(EtherTypes::Ipv4);
-                    arp_pkt.set_hw_addr_len(6);
-                    arp_pkt.set_proto_addr_len(4);
-                    arp_pkt.set_operation(ArpOperations::Request);
-                    arp_pkt.set_sender_hw_addr(source_mac);
-                    arp_pkt.set_sender_proto_addr(source);
-                    arp_pkt.set_target_hw_addr(MacAddr::zero());
-                    arp_pkt.set_target_proto_addr(dest);
-                },
-                None => {
-                    eprintln!("Failed to build ARP packet");
-                    return Err(io::Error::new(io::ErrorKind::AddrNotAvailable, format!("Failed to ping address: {}", dest.to_string())));
-                }
-            };
-
-        } else {
-            return Err(io::Error::new(io::ErrorKind::AddrNotAvailable, format!("Failed to ping address: {}", dest.to_string())));
-        }
-    } else {
-        return Err(io::Error::new(io::ErrorKind::AddrNotAvailable, format!("Failed to ping address: {}", dest.to_string())));
-    }
-
-    Ok(buffer)
-}
+use common::*;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     network: String,
-
-    #[arg(short, long, default_value_t = 1)]
-    count: u8,
 
     #[arg(short, long)]
     threads: Option<usize>
