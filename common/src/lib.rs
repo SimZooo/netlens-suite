@@ -1,10 +1,8 @@
-use std::{io, net::Ipv4Addr};
+use std::{io, net::{IpAddr, Ipv4Addr}};
 
-use pnet::{packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{Ipv4Flags, MutableIpv4Packet, checksum}, tcp::{MutableTcpPacket, ipv4_checksum}}, util::MacAddr};
+use pnet::{packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{Ipv4Flags, MutableIpv4Packet}, tcp::MutableTcpPacket}, util::MacAddr};
 
 pub fn build_tcp_packet(
-    src_mac: MacAddr,
-    dest_mac: MacAddr,
     src_port: u16, 
     dst_port: u16, 
     flags: u8, 
@@ -13,47 +11,40 @@ pub fn build_tcp_packet(
     src_ip: Ipv4Addr, 
     dest_ip: Ipv4Addr
 ) -> Vec<u8> {
-    let mut buf = vec![0u8; 54];
-
-    //Build ETH frame
-    {
-        let mut packet = MutableEthernetPacket::new(&mut buf[..14]).expect("Failed to create ethernet frame");
-        packet.set_source(src_mac);
-        packet.set_destination(dest_mac);
-        packet.set_ethertype(EtherTypes::Ipv4);
-    }
+    let mut buf = vec![0u8; 40];
+    let (ip_buf, tcp_buf) = buf.split_at_mut(20);
 
     // Build IPv4 header
-    {
-        let mut packet = MutableIpv4Packet::new(&mut buf[14..34]).expect("Failed to create IPv4 packet");
-        packet.set_version(4);
-        packet.set_header_length(5);
-        packet.set_total_length(40);
-        packet.set_ttl(64);
-        packet.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
-        packet.set_source(src_ip);
-        packet.set_destination(dest_ip);
-        packet.set_flags(Ipv4Flags::DontFragment);
-        packet.set_identification(0);
-        let checksum = checksum(&packet.to_immutable());
-        packet.set_checksum(checksum);
-    }
+    let mut packet = MutableIpv4Packet::new(ip_buf).unwrap();
+    packet.set_version(4);
+    packet.set_header_length(5);
+    packet.set_total_length(40);
+    packet.set_ttl(64);
+    packet.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+    packet.set_source(src_ip);
+    packet.set_destination(dest_ip);
+    packet.set_flags(Ipv4Flags::DontFragment);
+    packet.set_identification(0);
 
-    // Build TCP packet
-    {
-        let mut packet = MutableTcpPacket::new(&mut buf[34..54]).expect("Failed to create tcp packet");
-        packet.set_source(src_port);
-        packet.set_destination(dst_port);
-        packet.set_sequence(seq);
-        packet.set_acknowledgement(0);
-        packet.set_data_offset(5);
-        packet.set_flags(flags);
-        packet.set_window(window);
-        packet.set_urgent_ptr(0);
-        let checksum = pnet::packet::tcp::ipv4_checksum(&packet.to_immutable(), &src_ip, &dest_ip);
-        packet.set_checksum(checksum);
-    }
-    
+    // Build TCP header in buf[20..40]
+    let mut tcp_packet = MutableTcpPacket::new(tcp_buf).unwrap();
+    tcp_packet.set_source(src_port);
+    tcp_packet.set_destination(dst_port);
+    tcp_packet.set_sequence(seq);
+    tcp_packet.set_acknowledgement(0);
+    tcp_packet.set_data_offset(5);
+    tcp_packet.set_flags(flags);
+    tcp_packet.set_window(window);
+    tcp_packet.set_urgent_ptr(0);
+
+    // TCP checksum
+    let tcp_checksum = pnet::packet::tcp::ipv4_checksum(&tcp_packet.to_immutable(), &src_ip, &dest_ip);
+    tcp_packet.set_checksum(tcp_checksum);
+
+    // IPv4 checksum
+    let ipv4_checksum = pnet::packet::ipv4::checksum(&packet.to_immutable());
+    packet.set_checksum(ipv4_checksum);
+
     buf
 }
 
@@ -94,4 +85,17 @@ pub fn build_ping(source_mac: MacAddr, source: Ipv4Addr, dest: Ipv4Addr) -> io::
     }
 
     Ok(buffer)
+}
+
+pub fn get_interface_ip(name: &str) -> Option<Ipv4Addr> {
+    for iface in pnet::datalink::interfaces() {
+        if iface.name == name {
+            for ip in iface.ips {
+                if let IpAddr::V4(ipv4) = ip.ip() {
+                    return Some(ipv4);
+                }
+            }
+        }
+    }
+    None
 }
