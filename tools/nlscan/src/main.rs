@@ -75,10 +75,10 @@ struct Args {
 fn handle_tcp_flags(original_flags: u8, packet: &TcpPacket) -> PortState {
     match original_flags {
         TcpFlags::SYN => {
-            if packet.get_flags() == (TcpFlags::SYN | TcpFlags::ACK) { PortState::OPEN } else { PortState::CLOSED }
+            if packet.get_flags() == (TcpFlags::SYN | TcpFlags::ACK) || packet.get_flags() == (TcpFlags::ACK | TcpFlags::SYN) { PortState::OPEN } else { PortState::CLOSED }
         },
         TcpFlags::ACK => {
-            if packet.get_flags() == TcpFlags::RST { PortState::UNFILTERED } else { PortState::UNKNOWN }
+            if packet.get_flags() & TcpFlags::RST != 0 { PortState::UNFILTERED } else { PortState::UNKNOWN }
         },
         _ => {
             return PortState::UNKNOWN
@@ -241,9 +241,10 @@ fn main() {
     }
 
     let _ = receiver_handle.join();
-    let mut output_text = String::from("\n----- Port scan summary -----\n|     PORT\n").bold();
+    let mut output_text = format!("\n----- Port scan summary -----\n|   PORT\n").bold();
     replies.sort();
 
+    // Handle ACK scan
     if scan == ScanType::ACK {
         let filtered_ports: Vec<u16> = all_ports.iter()
             .filter(|port| !replies.contains(port))
@@ -254,7 +255,20 @@ fn main() {
     } else {
         // Handle SYN scan
         for reply in replies.iter() {
-            output_text = format!("{}|     {}\\tcp\n", output_text, reply).bold();
+            let banner = match grab_banner(dest_ip, *reply) {
+                Ok(banner) => {
+                    banner
+                },
+                Err(e) => {
+                    error!("Failed grabbing banner: {e}");
+                    "".to_string()
+                }
+            };
+            output_text = format!(
+                "{}| {:>4}/tcp    {}\n",
+                output_text,
+                reply, 
+                banner.lines().next().unwrap()).bold();
 
             let seq = rand::random::<u32>();
             let window = 64240u16;

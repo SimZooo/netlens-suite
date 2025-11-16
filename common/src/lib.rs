@@ -1,4 +1,4 @@
-use std::{io, net::{IpAddr, Ipv4Addr}, process::exit};
+use std::{io::{self, Read, Write}, net::{IpAddr, Ipv4Addr, TcpStream}, process::exit, time::Duration};
 
 use pnet::{packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{Ipv4Flags, MutableIpv4Packet}, tcp::MutableTcpPacket}, util::MacAddr};
 
@@ -103,4 +103,15 @@ pub fn get_interface_ip(name: &str) -> Option<Ipv4Addr> {
 pub fn fatal(msg: impl AsRef<str>) -> ! {
     eprintln!("Error: {}", msg.as_ref());
     exit(1)
+}
+
+pub fn grab_banner(addr: Ipv4Addr, port: u16) -> std::io::Result<String> {
+    let mut stream = TcpStream::connect(format!("{}:{}", addr, port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+
+    stream.write_all(b"\n")?;
+
+    let mut buf = [0u8; 1024];
+    let n = stream.read(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf[..n]).to_string())
 }
