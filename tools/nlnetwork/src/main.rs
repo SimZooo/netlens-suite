@@ -22,7 +22,7 @@ fn main() {
     let finished_sending = Arc::new(AtomicBool::new(false));
     let finished_clone = finished_sending.clone();
 
-    let cidr = args.network.parse::<Ipv4Network>().expect("Make sure network exists");
+    let cidr = args.network.parse::<Ipv4Network>().unwrap_or_else(|_| fatal("Make sure network exists"));
     let interfaces = pnet::datalink::interfaces();
 
     let replies = Arc::new(Mutex::new(Vec::<Ipv4Addr>::new()));
@@ -34,13 +34,13 @@ fn main() {
             IpAddr::V4(ip) => cidr.contains(ip),
             _ => false
         }
-    })).expect("Make sure network exists");
+    })).unwrap_or_else(|| fatal("Make sure network exists"));
 
     // Create transmitter and receiver
     let (mut tx, mut rx) = match pnet::datalink::channel(interface, Default::default()) {
         Ok(Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("Unhandled channel type"),
-        Err(e) => panic!("Failed to create channel to interface: {e}")
+        Ok(_) => fatal("Unhandled interface type"),
+        Err(e) => fatal(format!("Failed to create channel to interface: {e}"))
     };
 
     let pool = Arc::new(ThreadPool::new(threads));
@@ -93,9 +93,9 @@ fn main() {
             } else {
                 None
             }
-        }).next().expect("Make sure network exists");
+        }).next().unwrap_or_else(|| fatal("Make sure network exists"));
 
-        let buffer = build_ping(interface.mac.expect("Make sure network exists"), source_ip, ip);
+        let buffer = build_ping(interface.mac.unwrap_or_else(|| fatal("Make sure network exists")), source_ip, ip);
         if let Ok(packet) = buffer {
             if let Some(Err(e)) = tx.send_to(&packet, None) {
                 eprintln!("Failed to ping host: {}, err: {}", ip.to_string(), e);
@@ -109,9 +109,9 @@ fn main() {
 
     finished_sending.store(true, Ordering::Release);
 
-    receiver_handle.join().expect("Failed to join receiver handle");
+    receiver_handle.join().unwrap_or_else(|_| fatal("Failed to join receiver handle"));
     pool.join();
-    let replies = replies.lock().expect("Failed to lock replies");
+    let replies = replies.lock().unwrap_or_else(|_| fatal("Failed to lock replies"));
     for ip in replies.iter() {
         println!("Host: {ip} is up!")
     }

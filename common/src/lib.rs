@@ -1,4 +1,4 @@
-use std::{io, net::{IpAddr, Ipv4Addr}};
+use std::{io, net::{IpAddr, Ipv4Addr}, process::exit};
 
 use pnet::{packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{Ipv4Flags, MutableIpv4Packet}, tcp::MutableTcpPacket}, util::MacAddr};
 
@@ -98,4 +98,9 @@ pub fn get_interface_ip(name: &str) -> Option<Ipv4Addr> {
         }
     }
     None
+}
+
+pub fn fatal(msg: impl AsRef<str>) -> ! {
+    eprintln!("Error: {}", msg.as_ref());
+    exit(1)
 }

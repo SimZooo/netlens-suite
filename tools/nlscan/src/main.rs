@@ -1,11 +1,11 @@
-use std::{env, net::{IpAddr, Ipv4Addr}, process::exit, str::FromStr, sync::{Arc, Mutex, mpsc}, thread, time::{Duration, Instant}};
+use std::{env, net::{IpAddr, Ipv4Addr}, str::FromStr, sync::{Arc, Mutex, mpsc}, thread, time::{Duration, Instant}, vec::IntoIter};
 use colored::*;
 
 use clap::{Parser, value_parser};
-use common::build_tcp_packet;
-use log::{debug, error, info};
-use pnet::{packet::{Packet, ip::{IpNextHeaderProtocols}, ipv4::Ipv4Packet, tcp::{TcpFlags, TcpPacket}}};
-use pnet_transport::{TransportChannelType, TransportReceiver, ipv4_packet_iter};
+use common::*;
+use log::{debug, error};
+use pnet::{datalink::NetworkInterface, packet::{Packet, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::{TcpFlags, TcpPacket}}};
+use pnet_transport::{TransportChannelType, TransportReceiver, TransportSender, ipv4_packet_iter};
 use threadpool::ThreadPool;
 
 const TOP_TCP_1000: &str = "1,3-4,6-7,9,13,17,19-26,30,32-33,37,42-43,49,53,70,79-85,88-90,99-100,106,109-111,113,119,125,135,139,143-144,146,161,163,179,199,211-212,222,254-256,259,264,280,301,306,311,340,366,389,406-407,416-417,425,427,443-445,458,464-465,481,497,500,512-515,524,541,543-545,548,554-555,563,587,593,616-617,625,631,636,646,648,666-668,683,687,691,700,705,711,714,720,722,726,749,765,777,783,787,800-801,808,843,873,880,888,898,900-903,911-912,981,987,990,992-993,995,999-1002,1007,1009-1011,1021-1100,1102,1104-1108,1110-1114,1117,1119,1121-1124,1126,1130-1132,1137-1138,1141,1145,1147-1149,1151-1152,1154,1163-1166,1169,1174-1175,1183,1185-1187,1192,1198-1199,1201,1213,1216-1218,1233-1234,1236,1244,1247-1248,1259,1271-1272,1277,1287,1296,1300-1301,1309-1311,1322,1328,1334,1352,1417,1433-1434,1443,1455,1461,1494,1500-1501,1503,1521,1524,1533,1556,1580,1583,1594,1600,1641,1658,1666,1687-1688,1700,1717-1721,1723,1755,1761,1782-1783,1801,1805,1812,1839-1840,1862-1864,1875,1900,1914,1935,1947,1971-1972,1974,1984,1998-2010,2013,2020-2022,2030,2033-2035,2038,2040-2043,2045-2049,2065,2068,2099-2100,2103,2105-2107,2111,2119,2121,2126,2135,2144,2160-2161,2170,2179,2190-2191,2196,2200,2222,2251,2260,2288,2301,2323,2366,2381-2383,2393-2394,2399,2401,2492,2500,2522,2525,2557,2601-2602,2604-2605,2607-2608,2638,2701-2702,2710,2717-2718,2725,2800,2809,2811,2869,2875,2909-2910,2920,2967-2968,2998,3000-3001,3003,3005-3007,3011,3013,3017,3030-3031,3052,3071,3077,3128,3168,3211,3221,3260-3261,3268-3269,3283,3300-3301,3306,3322-3325,3333,3351,3367,3369-3372,3389-3390,3404,3476,3493,3517,3527,3546,3551,3580,3659,3689-3690,3703,3737,3766,3784,3800-3801,3809,3814,3826-3828,3851,3869,3871,3878,3880,3889,3905,3914,3918,3920,3945,3971,3986,3995,3998,4000-4006,4045,4111,4125-4126,4129,4224,4242,4279,4321,4343,4443-4446,4449,4550,4567,4662,4848,4899-4900,4998,5000-5004,5009,5030,5033,5050-5051,5054,5060-5061,5080,5087,5100-5102,5120,5190,5200,5214,5221-5222,5225-5226,5269,5280,5298,5357,5405,5414,5431-5432,5440,5500,5510,5544,5550,5555,5560,5566,5631,5633,5666,5678-5679,5718,5730,5800-5802,5810-5811,5815,5822,5825,5850,5859,5862,5877,5900-5904,5906-5907,5910-5911,5915,5922,5925,5950,5952,5959-5963,5987-5989,5998-6007,6009,6025,6059,6100-6101,6106,6112,6123,6129,6156,6346,6389,6502,6510,6543,6547,6565-6567,6580,6646,6666-6669,6689,6692,6699,6779,6788-6789,6792,6839,6881,6901,6969,7000-7002,7004,7007,7019,7025,7070,7100,7103,7106,7200-7201,7402,7435,7443,7496,7512,7625,7627,7676,7741,7777-7778,7800,7911,7920-7921,7937-7938,7999-8002,8007-8011,8021-8022,8031,8042,8045,8080-8090,8093,8099-8100,8180-8181,8192-8194,8200,8222,8254,8290-8292,8300,8333,8383,8400,8402,8443,8500,8600,8649,8651-8652,8654,8701,8800,8873,8888,8899,8994,9000-9003,9009-9011,9040,9050,9071,9080-9081,9090-9091,9099-9103,9110-9111,9200,9207,9220,9290,9415,9418,9485,9500,9502-9503,9535,9575,9593-9595,9618,9666,9876-9878,9898,9900,9917,9929,9943-9944,9968,9998-10004,10009-10010,10012,10024-10025,10082,10180,10215,10243,10566,10616-10617,10621,10626,10628-10629,10778,11110-11111,11967,12000,12174,12265,12345,13456,13722,13782-13783,14000,14238,14441-14442,15000,15002-15004,15660,15742,16000-16001,16012,16016,16018,16080,16113,16992-16993,17877,17988,18040,18101,18988,19101,19283,19315,19350,19780,19801,19842,20000,20005,20031,20221-20222,20828,21571,22939,23502,24444,24800,25734-25735,26214,27000,27352-27353,27355-27356,27715,28201,30000,30718,30951,31038,31337,32768-32785,33354,33899,34571-34573,35500,38292,40193,40911,41511,42510,44176,44442-44443,44501,45100,48080,49152-49161,49163,49165,49167,49175-49176,49400,49999-50003,50006,50300,50389,50500,50636,50800,51103,51493,52673,52822,52848,52869,54045,54328,55055-55056,55555,55600,56737-56738,57294,57797,58080,60020,60443,61532,61900,62078,63331,64623,64680,65000,65129,65389";
@@ -13,11 +13,20 @@ const TOP_TCP_1000: &str = "1,3-4,6-7,9,13,17,19-26,30,32-33,37,42-43,49,53,70,7
 const TOP_TCP_100: &str = "7,9,13,21-23,25-26,37,53,79-81,88,106,110-111,113,119,135,139,143-144,179,199,389,427,443-445,465,513-515,543-544,548,554,587,631,646,873,990,993,995,1025-1029,1110,1433,1720,1723,1755,1900,2000-2001,2049,2121,2717,3000,3128,3306,3389,3986,4899,5000,5009,5051,5060,5101,5190,5357,5432,5631,5666,5800,5900,6000-6001,6646,7070,8000,8008-8009,8080-8081,8443,8888,9100,9999-10000,32768,49152-49157";
 //const TOP_UDP_100: &str = "7,9,17,19,49,53,67-69,80,88,111,120,123,135-139,158,161-162,177,427,443,445,497,500,514-515,518,520,593,623,626,631,996-999,1022-1023,1025-1030,1433-1434,1645-1646,1701,1718-1719,1812-1813,1900,2000,2048-2049,2222-2223,3283,3456,3703,4444,4500,5000,5060,5353,5632,9200,10000,17185,20031,30718,31337,32768-32769,32771,32815,33281,49152-49154,49156,49181-49182,49185-49186,49188,49190-49194,49200-49201,65024";
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScanType {
     ACK, // TCP ACK scan
     SYN, // TCP SYN scan
     TWH, // TCP 3-way handshake
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PortState {
+    OPEN,
+    CLOSED,
+    FILTERED,
+    UNFILTERED,
+    UNKNOWN
 }
 
 impl FromStr for ScanType {
@@ -42,11 +51,6 @@ impl FromStr for ScanType {
     }
 }
 
-fn fatal(msg: impl AsRef<str>) -> ! {
-    eprintln!("Error: {}", msg.as_ref());
-    exit(1)
-}
-
 #[derive(Parser, Debug)]
 #[command(version, long_about = None)]
 struct Args {
@@ -68,19 +72,21 @@ struct Args {
     fast: bool
 }
 
-fn handle_tcp_flags(original_flags: u8, packet: &TcpPacket) -> bool {
+fn handle_tcp_flags(original_flags: u8, packet: &TcpPacket) -> PortState {
     match original_flags {
         TcpFlags::SYN => {
-            return packet.get_flags() == (TcpFlags::SYN | TcpFlags::ACK);
+            if packet.get_flags() == (TcpFlags::SYN | TcpFlags::ACK) { PortState::OPEN } else { PortState::CLOSED }
+        },
+        TcpFlags::ACK => {
+            if packet.get_flags() == TcpFlags::RST { PortState::UNFILTERED } else { PortState::UNKNOWN }
         },
         _ => {
-            eprintln!("Unknown flag returned");
-            false
+            return PortState::UNKNOWN
         }
     }
 }
 
-fn handle_packet(tx_replies: &mpsc::Sender<u16>, packet: Ipv4Packet, original_flags: u8, src_ip: Ipv4Addr, dest_ip: Ipv4Addr) {
+fn handle_packet(tx_replies: &mpsc::Sender<u16>, packet: Ipv4Packet, original_flags: u8, src_ip: Ipv4Addr, dest_ip: Ipv4Addr, src_port: u16) {
     let packet_payload = packet.payload();
 
     if packet.get_source() != dest_ip || packet.get_destination() != src_ip || packet_payload.len() < 20 {
@@ -88,33 +94,79 @@ fn handle_packet(tx_replies: &mpsc::Sender<u16>, packet: Ipv4Packet, original_fl
     }
 
     if let Some(tcp) = TcpPacket::new(packet_payload) {
+        if tcp.get_destination() != src_port {
+            return;
+        }
+
         debug!("Packet received from {}:{} → {}:{} flags: 0x{:x}", 
             packet.get_source(), tcp.get_source(), 
             packet.get_destination(), tcp.get_destination(), 
             tcp.get_flags()
         );
-        let open = handle_tcp_flags(original_flags, &tcp);
-        if open {
+        let port_state = handle_tcp_flags(original_flags, &tcp);
+        if port_state == PortState::OPEN || port_state == PortState::UNFILTERED {
             tx_replies.send(tcp.get_source()).ok();
         }
     }
 }
 
-fn receive_packets(rx: &mut TransportReceiver, tx_replies: &mpsc::Sender<u16>, original_flags: u8, src_ip: Ipv4Addr, dest_ip: Ipv4Addr) {
-    let timeout = 500;
+fn receive_packets(rx: &mut TransportReceiver, tx_replies: &mpsc::Sender<u16>, original_flags: u8, src_ip: Ipv4Addr, dest_ip: Ipv4Addr, src_port: u16) {
+    let timeout = 2000;
     let sleep_time = Instant::now() + Duration::from_millis(timeout);
     let mut iter = ipv4_packet_iter(rx);
 
     while Instant::now() < sleep_time {
         match iter.next() {
             Ok((packet, _)) => {
-                handle_packet(&tx_replies, packet, original_flags, src_ip, dest_ip);
+                handle_packet(&tx_replies, packet, original_flags, src_ip, dest_ip, src_port);
             },
             Err(_) => {}
         }
     }
 }
 
+fn get_interface(args_interface: Option<String>) -> NetworkInterface {
+    let interfaces = pnet::datalink::interfaces();
+    let interface;
+    if let Some(itf) = args_interface {
+        interface = interfaces.iter().find(|iface| iface.name == itf).unwrap_or_else(|| fatal(format!("Invalid interface given: {}", itf)));
+    } else {
+        debug!("Interface not specified");
+        interface = interfaces.iter().find(|itf| {
+            !itf.is_loopback() && itf.ips.iter().any(|ip| ip.is_ipv4())
+        }).unwrap_or_else(|| fatal("Failed to identify interface"));
+    }
+
+    interface.clone()
+}
+
+fn get_src_ip(interface: &NetworkInterface) -> Ipv4Addr {
+    interface.ips.iter().find_map(|ip| match ip.ip() {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None
+    }).unwrap_or_else(|| fatal("IPv6 not available"))
+}
+
+fn send_packets(ports_iter: IntoIter<u16>, src_port: u16, tx: Arc<Mutex<TransportSender>>, dest_ip: Ipv4Addr, pool: &ThreadPool, tcp_flags: u8, src_ip: Ipv4Addr) {
+    for (i, port) in ports_iter.enumerate() {
+        let tx_port = tx.clone();
+
+        pool.execute(move || {
+            let seq = rand::random::<u32>();
+            let window = 64240u16;
+            let buffer = build_tcp_packet(src_port, port, tcp_flags, seq, window, src_ip, dest_ip);
+            let packet = Ipv4Packet::new(&buffer[..]).unwrap_or_else(|| fatal("Failed to create TCP packet"));
+            if let Ok(_) = tx_port.lock().unwrap().send_to(packet, IpAddr::V4(dest_ip)) {
+
+            } else {
+                error!("Failed to send packet");
+            }
+        });
+        if i % 50 == 0 {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
 
 fn main() {
     let start = Instant::now();
@@ -128,33 +180,17 @@ fn main() {
     let ports = tmp.split(",").map(|s| s.to_string()).collect::<Vec<String>>();
     let threads = args.threads.unwrap_or(30);
     let pool = ThreadPool::new(threads);
+    let interface = get_interface(args.interface);
+    let src_ip = get_src_ip(&interface);
 
-    let interfaces = pnet::datalink::interfaces();
-    let interface;
-    if let Some(itf) = args.interface {
-        interface = interfaces.iter().find(|iface| iface.name == itf).unwrap_or_else(|| fatal(format!("Invalid interface given: {}", itf)));
-    } else {
-        debug!("Interface not specified");
-        interface = interfaces.iter().find(|itf| {
-            !itf.is_loopback() && itf.ips.iter().any(|ip| ip.is_ipv4())
-        }).unwrap_or_else(|| fatal("Failed to identify interface"));
-    }
-    
     println!("Starting scan of {} on interface {} with {} threads", dest_ip, interface.name, threads);
     debug!("Interface selected: {}", interface.name);
-
-    let src_ip  = interface.ips.iter().find_map(|ip| match ip.ip() {
-        IpAddr::V4(ip) => Some(ip),
-        IpAddr::V6(_) => None
-    }).unwrap_or_else(|| fatal("IPv6 not available"));
 
     let (tx, mut rx) = match pnet_transport::transport_channel(4096, TransportChannelType::Layer3(IpNextHeaderProtocols::Tcp)) {
         Ok((tx, rx)) => (tx, rx),
         Err(e) => { fatal(format!("Failed when creating channel {e}"))}
     };
-
     let tx = Arc::new(Mutex::new(tx));
-
     let (replies_tx, replies_rx) = mpsc::channel::<u16>();
 
     let scan = args.scan.unwrap_or(ScanType::SYN);
@@ -173,65 +209,68 @@ fn main() {
     debug!("Scan type: {:?}", scan);
 
     let receiver_handle = thread::spawn(move || {
-        receive_packets(&mut rx, &replies_tx, tcp_flags, src_ip, dest_ip);
+        receive_packets(&mut rx, &replies_tx, tcp_flags, src_ip, dest_ip, src_port);
     });
 
     debug!("Receiver handle created");
 
     let ports_iter = ports.into_iter();
-
-    let start_sending_time = Instant::now();
+    let mut all_ports = vec![];
     ports_iter.for_each(|port| {
-        let tx_port = tx.clone();
+        let mut split_ports = port.split("-").map(|p| p.parse().unwrap_or_else(|_| fatal(format!("Failed to parse port as integer: {}", p)))).collect::<Vec<u16>>();
+        if split_ports.len() == 1 {
+            split_ports.push(split_ports[0]);
+        }
 
-        pool.execute(move || {
-            let mut split_ports = port.split("-").map(|p| p.parse().unwrap_or_else(|_| fatal(format!("Failed to parse port as integer: {}", p)))).collect::<Vec<u16>>();
-            if split_ports.len() == 1 {
-                split_ports.push(split_ports[0]);
-            }
-
-            for p in split_ports[0]..=split_ports[1] {
-                let seq = rand::random::<u32>();
-                let window = 64240u16;
-                let buffer = build_tcp_packet(src_port, p, tcp_flags, seq, window, src_ip, dest_ip);
-                let packet = Ipv4Packet::new(&buffer[..]).unwrap_or_else(|| fatal("Failed to create TCP packet"));
-                if let Ok(_) = tx_port.lock().unwrap().send_to(packet, IpAddr::V4(dest_ip)) {
-
-                } else {
-                    error!("Failed to send packet");
-                }
-            }
-        });
+        for p in split_ports[0]..=split_ports[1] {
+            all_ports.push(p);
+        }
     });
+
+    let all_ports_iter = all_ports.clone().into_iter();
+    let start_sending_time = Instant::now();
+    send_packets(all_ports_iter, src_port, tx.clone(), dest_ip, &pool, tcp_flags, src_ip);
+    pool.join();
     let elapsed = Instant::elapsed(&start_sending_time);
+
     debug!("Finished sending port packets. Sending time: {}s", elapsed.as_secs_f32());
 
     let mut replies = vec![];
     while let Ok(port) = replies_rx.recv_timeout(Duration::from_millis(500)) {
-        replies.push(port)
+        replies.push(port);
     }
 
     let _ = receiver_handle.join();
     let mut output_text = String::from("\n----- Port scan summary -----\n|     PORT\n").bold();
     replies.sort();
 
-    for reply in replies.iter() {
-        let seq = rand::random::<u32>();
-        let window = 64240u16;
-        let flags = match scan { ScanType::TWH => TcpFlags::ACK, ScanType::SYN => TcpFlags::RST, ScanType::ACK => continue };
-        let buffer = build_tcp_packet(src_port, *reply, flags, seq, window, src_ip, dest_ip);
+    if scan == ScanType::ACK {
+        let filtered_ports: Vec<u16> = all_ports.iter()
+            .filter(|port| !replies.contains(port))
+            .cloned()
+            .collect();
 
-        if let Some(packet) = Ipv4Packet::new(&buffer[..]) {
-            if let Ok(_) = tx.lock().unwrap().send_to(packet, IpAddr::V4(dest_ip)) {
-                debug!("Sent last transaction")
+        println!("{:?}", filtered_ports);
+    } else {
+        // Handle SYN scan
+        for reply in replies.iter() {
+            output_text = format!("{}|     {}\\tcp\n", output_text, reply).bold();
+
+            let seq = rand::random::<u32>();
+            let window = 64240u16;
+            let flags = match scan { ScanType::TWH => TcpFlags::ACK, ScanType::SYN => TcpFlags::RST, ScanType::ACK => continue };
+            let buffer = build_tcp_packet(src_port, *reply, flags, seq, window, src_ip, dest_ip);
+
+            if let Some(packet) = Ipv4Packet::new(&buffer[..]) {
+                if let Ok(_) = tx.lock().unwrap().send_to(packet, IpAddr::V4(dest_ip)) {
+                    debug!("Sent last transaction")
+                } else {
+                    error!("Failed to send last transaction")
+                }
             } else {
-                error!("Failed to send last transaction")
+                continue;
             }
-        } else {
-            continue;
         }
-
-        output_text = format!("{}|     {}\\tcp\n", output_text, reply).bold();
     }
 
     println!("{}", output_text);
