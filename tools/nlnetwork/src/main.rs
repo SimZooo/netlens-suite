@@ -40,7 +40,7 @@ fn main() {
     let (mut tx, mut rx) = match pnet::datalink::channel(interface, Default::default()) {
         Ok(Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => panic!("Unhandled channel type"),
-        Err(_) => panic!("Failed to create channel to interface")
+        Err(e) => panic!("Failed to create channel to interface: {e}")
     };
 
     let pool = Arc::new(ThreadPool::new(threads));

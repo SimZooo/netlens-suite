@@ -13,6 +13,9 @@ Netlens suite is a set of lightweight tools for penetration testing, written in 
     -h, --help               Print help
     -V, --version            Print version
 **nlscan** - port scanner
+Currently only supports SYN scans
+The different possible scans: SYN, ACK, TWH
+These can be specified like: `-sS`, `-s S`, `-s SYN`
 
     Usage: nlscan [OPTIONS] --host <HOST>
     Options:

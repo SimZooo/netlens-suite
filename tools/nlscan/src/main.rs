@@ -1,9 +1,9 @@
-use std::{env, net::{IpAddr, Ipv4Addr}, str::FromStr, sync::{Arc, Mutex, mpsc}, thread, time::{Duration, Instant}};
+use std::{env, net::{IpAddr, Ipv4Addr}, process::exit, str::FromStr, sync::{Arc, Mutex, mpsc}, thread, time::{Duration, Instant}};
 use colored::*;
 
 use clap::{Parser, value_parser};
 use common::build_tcp_packet;
-use log::{debug, error};
+use log::{debug, error, info};
 use pnet::{packet::{Packet, ip::{IpNextHeaderProtocols}, ipv4::Ipv4Packet, tcp::{TcpFlags, TcpPacket}}};
 use pnet_transport::{TransportChannelType, TransportReceiver, ipv4_packet_iter};
 use threadpool::ThreadPool;
@@ -42,6 +42,11 @@ impl FromStr for ScanType {
     }
 }
 
+fn fatal(msg: impl AsRef<str>) -> ! {
+    eprintln!("Error: {}", msg.as_ref());
+    exit(1)
+}
+
 #[derive(Parser, Debug)]
 #[command(version, long_about = None)]
 struct Args {
@@ -69,7 +74,8 @@ fn handle_tcp_flags(original_flags: u8, packet: &TcpPacket) -> bool {
             return packet.get_flags() == (TcpFlags::SYN | TcpFlags::ACK);
         },
         _ => {
-            panic!("Unknown flag returned")
+            eprintln!("Unknown flag returned");
+            false
         }
     }
 }
@@ -109,6 +115,7 @@ fn receive_packets(rx: &mut TransportReceiver, tx_replies: &mpsc::Sender<u16>, o
     }
 }
 
+
 fn main() {
     let start = Instant::now();
     unsafe { env::set_var("RUST_LOG", "info") };
@@ -116,7 +123,7 @@ fn main() {
 
     let args = Args::parse();
     let tmp = args.ports.unwrap_or(if args.fast { TOP_TCP_100.to_string() } else { TOP_TCP_1000.to_string() });
-    let dest_ip: Ipv4Addr = args.host.parse().expect("Failed to parse host as IP");
+    let dest_ip: Ipv4Addr = args.host.parse().unwrap_or_else(|_| fatal("Failed to parse host as IP"));
     let src_port = args.source_port.unwrap_or(40000);
     let ports = tmp.split(",").map(|s| s.to_string()).collect::<Vec<String>>();
     let threads = args.threads.unwrap_or(30);
@@ -125,12 +132,12 @@ fn main() {
     let interfaces = pnet::datalink::interfaces();
     let interface;
     if let Some(itf) = args.interface {
-        interface = interfaces.iter().find(|iface| iface.name == itf).expect(format!("Invalid interface given: {}", itf).as_str());
+        interface = interfaces.iter().find(|iface| iface.name == itf).unwrap_or_else(|| fatal(format!("Invalid interface given: {}", itf)));
     } else {
         debug!("Interface not specified");
         interface = interfaces.iter().find(|itf| {
             !itf.is_loopback() && itf.ips.iter().any(|ip| ip.is_ipv4())
-        }).expect("Failed to identify interface");
+        }).unwrap_or_else(|| fatal("Failed to identify interface"));
     }
     
     println!("Starting scan of {} on interface {} with {} threads", dest_ip, interface.name, threads);
@@ -139,11 +146,11 @@ fn main() {
     let src_ip  = interface.ips.iter().find_map(|ip| match ip.ip() {
         IpAddr::V4(ip) => Some(ip),
         IpAddr::V6(_) => None
-    }).expect("IPv6 not available");
+    }).unwrap_or_else(|| fatal("IPv6 not available"));
 
     let (tx, mut rx) = match pnet_transport::transport_channel(4096, TransportChannelType::Layer3(IpNextHeaderProtocols::Tcp)) {
         Ok((tx, rx)) => (tx, rx),
-        Err(e) => { panic!("Failed when creating channel {e}")}
+        Err(e) => { fatal(format!("Failed when creating channel {e}"))}
     };
 
     let tx = Arc::new(Mutex::new(tx));
@@ -178,7 +185,7 @@ fn main() {
         let tx_port = tx.clone();
 
         pool.execute(move || {
-            let mut split_ports = port.split("-").map(|p| p.parse().expect(format!("Failed to parse port as integer: {}", p).as_str())).collect::<Vec<u16>>();
+            let mut split_ports = port.split("-").map(|p| p.parse().unwrap_or_else(|_| fatal(format!("Failed to parse port as integer: {}", p)))).collect::<Vec<u16>>();
             if split_ports.len() == 1 {
                 split_ports.push(split_ports[0]);
             }
@@ -187,7 +194,7 @@ fn main() {
                 let seq = rand::random::<u32>();
                 let window = 64240u16;
                 let buffer = build_tcp_packet(src_port, p, tcp_flags, seq, window, src_ip, dest_ip);
-                let packet = Ipv4Packet::new(&buffer[..]).expect("Failed to create TCP packet");
+                let packet = Ipv4Packet::new(&buffer[..]).unwrap_or_else(|| fatal("Failed to create TCP packet"));
                 if let Ok(_) = tx_port.lock().unwrap().send_to(packet, IpAddr::V4(dest_ip)) {
 
                 } else {
@@ -209,8 +216,24 @@ fn main() {
     replies.sort();
 
     for reply in replies.iter() {
+        let seq = rand::random::<u32>();
+        let window = 64240u16;
+        let flags = match scan { ScanType::TWH => TcpFlags::ACK, ScanType::SYN => TcpFlags::RST, ScanType::ACK => continue };
+        let buffer = build_tcp_packet(src_port, *reply, flags, seq, window, src_ip, dest_ip);
+
+        if let Some(packet) = Ipv4Packet::new(&buffer[..]) {
+            if let Ok(_) = tx.lock().unwrap().send_to(packet, IpAddr::V4(dest_ip)) {
+                debug!("Sent last transaction")
+            } else {
+                error!("Failed to send last transaction")
+            }
+        } else {
+            continue;
+        }
+
         output_text = format!("{}|     {}\\tcp\n", output_text, reply).bold();
     }
+
     println!("{}", output_text);
     println!("Finished scanning. Total time: {}s", start.elapsed().as_secs())
 }
