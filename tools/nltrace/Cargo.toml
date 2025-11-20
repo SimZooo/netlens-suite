@@ -1,5 +1,5 @@
 [package]
-name = "nlscan"
+name = "nltrace"
 edition = "2024"
 version.workspace = true
 authors.workspace = true
@@ -8,12 +8,9 @@ authors.workspace = true
 clap = { workspace = true, features = ["derive"]}
 pnet = { workspace = true }
 threadpool = { workspace = true }
-common = { path = "../../common" }
-rand = "0.9.2"
-log = "0.4.28"
-env_logger = "0.11.8"
-pnet_transport = "0.35.0"
-colored = "3.0.0"
-serde_json = "1.0.145"
-regex = "1.12.2"
+common = { path = "../../common"}
+blake3 = "1.8.2"
+ratatui = "0.29.0"
+crossterm = "0.29.0"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"

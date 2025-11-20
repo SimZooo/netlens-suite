@@ -1,6 +1,9 @@
 use std::{io::{self, Read, Write}, net::{IpAddr, Ipv4Addr, TcpStream}, process::exit, time::Duration};
 
-use pnet::{packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{Ipv4Flags, MutableIpv4Packet}, tcp::MutableTcpPacket}, util::MacAddr};
+use log::debug;
+use pnet::{datalink::{self, NetworkInterface}, packet::{arp::{ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket}, ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{Ipv4Flags, MutableIpv4Packet}, tcp::MutableTcpPacket}, util::MacAddr};
+use pnet::packet::Packet;
+use pnet::datalink::Channel::Ethernet;
 
 pub fn build_tcp_packet(
     src_port: u16, 
@@ -113,5 +116,90 @@ pub fn grab_banner(addr: Ipv4Addr, port: u16) -> std::io::Result<String> {
 
     let mut buf = [0u8; 1024];
     let n = stream.read(&mut buf)?;
-    Ok(String::from_utf8_lossy(&buf[..n]).to_string())
+    let tmp = String::from_utf8_lossy(&buf[..n]).to_string();
+    let banner_line = tmp.split_ascii_whitespace().next().unwrap_or_else(|| {
+        return ""
+    });
+
+    Ok(banner_line.to_string())
+}
+
+pub fn interface_from_ip(network_address: String) -> Option<NetworkInterface> {
+    let interfaces = pnet::datalink::interfaces();
+    let target_network: IpAddr = network_address.parse().unwrap_or_else(|_| fatal("Failed to parse network address, make sure the input is correct"));
+    let interface = interfaces.iter().find(|iface| {
+        iface.ips.iter().any(|network| {
+            network.ip() == target_network
+        })
+    });
+
+    interface.cloned()
+}
+
+pub fn get_mac_for_ip(target_ip: Ipv4Addr) -> Option<MacAddr> {
+    // Choose interface (change name if needed)
+    let interface = datalink::interfaces()
+        .into_iter()
+        .find(|iface| iface.name == "wlan0" || iface.name == "eth0")
+        .expect("No usable interface");
+
+    let source_mac = interface.mac?;
+    let source_ip = interface.ips
+        .iter()
+        .find_map(|ip| match ip.ip() {
+            std::net::IpAddr::V4(v4) => Some(v4),
+            _ => None,
+        })?;
+
+    // Create datalink channel (raw packet send/receive)
+    let (mut tx, mut rx) = match datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(tx, rx)) => (tx, rx),
+        _ => panic!("Failed to open datalink channel"),
+    };
+
+    // === Build ARP Request ===
+    let mut ethernet_buf = [0u8; 42];
+    {
+        let mut eth_packet = MutableEthernetPacket::new(&mut ethernet_buf).unwrap();
+
+        eth_packet.set_destination(pnet::datalink::MacAddr::broadcast());
+        eth_packet.set_source(source_mac);
+        eth_packet.set_ethertype(EtherTypes::Arp);
+
+        let mut arp_buf = [0u8; 28];
+        {
+            let mut arp_packet = MutableArpPacket::new(&mut arp_buf).unwrap();
+            arp_packet.set_hardware_type(ArpHardwareTypes::Ethernet);
+            arp_packet.set_protocol_type(EtherTypes::Ipv4);
+            arp_packet.set_hw_addr_len(6);
+            arp_packet.set_proto_addr_len(4);
+            arp_packet.set_operation(ArpOperations::Request);
+            arp_packet.set_sender_hw_addr(source_mac);
+            arp_packet.set_sender_proto_addr(source_ip);
+            arp_packet.set_target_hw_addr(pnet::datalink::MacAddr::zero());
+            arp_packet.set_target_proto_addr(target_ip);
+        }
+
+        eth_packet.set_payload(&arp_buf);
+    }
+
+    // Send ARP request
+    tx.send_to(&ethernet_buf, None).unwrap();
+
+    // === Wait for ARP reply ===
+    loop {
+        if let Ok(packet) = rx.next() {
+            if let Some(eth) = EthernetPacket::new(packet) {
+                if eth.get_ethertype() == EtherTypes::Arp {
+                    if let Some(arp) = ArpPacket::new(eth.payload()) {
+                        if arp.get_operation() == ArpOperations::Reply &&
+                           arp.get_sender_proto_addr() == target_ip
+                        {
+                            return Some(arp.get_sender_hw_addr());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

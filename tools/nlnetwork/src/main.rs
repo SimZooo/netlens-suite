@@ -1,8 +1,9 @@
 use std::{net::{IpAddr, Ipv4Addr}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread::{self, sleep}, time::{Duration, Instant}};
+use serde_json::json;
 use threadpool::ThreadPool;
 
 use clap::Parser;
-use pnet::{datalink::{Channel::Ethernet}, ipnetwork::{Ipv4Network}, packet::{Packet, arp::{ArpOperations, ArpPacket}, ethernet::{EtherTypes, EthernetPacket}}};
+use pnet::{datalink::Channel::Ethernet, ipnetwork::Ipv4Network, packet::{Packet, arp::{ArpOperations, ArpPacket}, ethernet::{EtherTypes, EthernetPacket}}, util::MacAddr};
 
 use common::*;
 
@@ -10,9 +11,10 @@ use common::*;
 #[command(version, about, long_about = None)]
 struct Args {
     network: String,
-
     #[arg(short, long)]
-    threads: Option<usize>
+    threads: Option<usize>,
+    #[arg(short, long)]
+    json: bool
 }
 
 fn main() {
@@ -25,7 +27,7 @@ fn main() {
     let cidr = args.network.parse::<Ipv4Network>().unwrap_or_else(|_| fatal("Make sure network exists"));
     let interfaces = pnet::datalink::interfaces();
 
-    let replies = Arc::new(Mutex::new(Vec::<Ipv4Addr>::new()));
+    let replies = Arc::new(Mutex::new(Vec::<(Ipv4Addr, String, String)>::new()));
     let replies_clone = replies.clone();
 
     // Find interface with specified network address
@@ -71,7 +73,9 @@ fn main() {
                                 if arp.get_operation() != ArpOperations::Reply { return; }
                                 match reply_clone.lock() {
                                     Ok(mut map) => {
-                                        map.push(arp.get_sender_proto_addr());
+                                        if !map.contains(&(arp.get_sender_proto_addr(), eth.get_source().to_string(), eth.get_ethertype().to_string())) {
+                                            map.push((arp.get_sender_proto_addr(), eth.get_source().to_string(), arp.get_protocol_type().to_string()));
+                                        }
                                     },
                                     Err(e) => { eprintln!("Failed to lock replies vec: {e}"); return; }
                                 };
@@ -84,7 +88,9 @@ fn main() {
         }
     });
     
-    println!("Scanning network: {} with {} threads", args.network, threads);
+    if !args.json {
+        println!("Scanning network: {} with {} threads", args.network, threads);
+    }
     // Iterate through all hosts
     for ip in cidr.iter().skip(1).take((cidr.size() - 2) as usize) {
         let source_ip = interface.ips.iter().filter_map(|ip| {
@@ -112,9 +118,16 @@ fn main() {
     receiver_handle.join().unwrap_or_else(|_| fatal("Failed to join receiver handle"));
     pool.join();
     let replies = replies.lock().unwrap_or_else(|_| fatal("Failed to lock replies"));
-    for ip in replies.iter() {
-        println!("Host: {ip} is up!")
+    if args.json {
+        let replies_json = json!(*replies);
+        println!("{}", replies_json);
+        return;
+    } else {
+        for ip in replies.iter() {
+            println!("Host: {} is up! Mac: {}", ip.0, ip.1)
+        }
     }
     let end_time = Instant::now();
+
     println!("{} Hosts found. Operation took: {}", replies.len(), (end_time - start_time).as_secs_f32());
 }

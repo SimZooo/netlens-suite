@@ -1,6 +1,7 @@
 # Netlens suite
-Netlens suite is a set of lightweight tools for penetration testing, written in rust.
+Netlens suite is a set of lightweight tools for penetration testing, written in rust. It follows the **recon** -> **detect** -> **exploit** format, specifically the recon and detect phases, wherein the tools are grouped as such:
 ### v0.1.0
+#### Recon
 **nlnetwork** - network scanner
 
     Usage: nlnetwork [OPTIONS] <NETWORK>
@@ -28,3 +29,7 @@ These can be specified like: `-sS`, `-s S`, `-s SYN`
     -m, --mac <MAC>
     -h, --help                       Print help
     -V, --version                    Print version
+
+#### Detect
+**nlvuln** - vulnerability scanner
+#### Exploit

@@ -2,6 +2,9 @@
 members = [
     "tools/nlscan",
     "tools/nlnetwork",
+    "tools/nlvuln",
+    "tools/nltrace",
+    "tools/netlens-tui",
     "common"
 ]
 
